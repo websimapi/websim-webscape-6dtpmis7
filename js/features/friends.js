@@ -1,0 +1,208 @@
+import { addTooltip, tooltip } from '../ui/tooltips.js';
+import { showContextMenu, hideContextMenu } from '../ui/contextMenu.js';
+import { setupOverlay } from '../ui/overlays.js';
+import { toggleMenu } from './menuManager.js';
+
+function renderFriendsList() {
+  // Render Main Panel
+  const panel = document.createElement('div');
+  panel.className = 'friends-list';
+  panel.innerHTML = `
+    <div class="list-container">
+      <!-- Empty container - friends will be added dynamically -->
+    </div>
+    <div class="list-buttons">
+      <button class="list-button">Add Friend</button>
+      <button class="list-button">Del Friend</button>
+    </div>
+  `;
+  document.getElementById('right-panel').appendChild(panel);
+
+  // Render Overlays
+  const chatWindow = document.getElementById('chat-window');
+  
+  const addOverlay = document.createElement('div');
+  addOverlay.id = 'add-friend-overlay';
+  addOverlay.innerHTML = `
+    <div class="add-friend-container">
+      <div class="add-friend-text">Enter name of friend to add to list</div>
+      <input type="text" class="add-friend-input" maxlength="12" />
+    </div>
+  `;
+  chatWindow.appendChild(addOverlay);
+
+  const delOverlay = document.createElement('div');
+  delOverlay.id = 'del-friend-overlay';
+  delOverlay.innerHTML = `
+    <div class="del-friend-container">
+      <div class="del-friend-text">Enter name of friend to delete from list</div>
+      <input type="text" class="del-friend-input" maxlength="12" />
+    </div>
+  `;
+  chatWindow.appendChild(delOverlay);
+}
+
+function initializeFriendsList() {
+  renderFriendsList();
+
+  const friendsButton = document.querySelector('.bottom-icon:nth-child(2)');
+  const friendsList = document.querySelector('.friends-list');
+  const addFriendButton = document.querySelector('.friends-list .list-button:first-child');
+  const delFriendButton = document.querySelector('.friends-list .list-button:nth-child(2)');
+  const addFriendOverlay = document.getElementById('add-friend-overlay');
+  const delFriendOverlay = document.getElementById('del-friend-overlay');
+  const addFriendInput = addFriendOverlay.querySelector('.add-friend-input');
+  const delFriendInput = delFriendOverlay.querySelector('.del-friend-input');
+  const friendsListContainer = document.querySelector('.friends-list .list-container');
+
+  // Setup tooltips
+  addTooltip(addFriendButton, 'Add friend');
+  addTooltip(delFriendButton, 'Delete friend');
+
+  // Setup friends list toggle with menu management
+  friendsButton.addEventListener('click', () => {
+    toggleMenu(friendsButton, '.friends-list');
+  });
+
+  // Setup overlays
+  setupOverlay(addFriendOverlay, addFriendInput);
+  setupOverlay(delFriendOverlay, delFriendInput);
+
+  // --- Local Storage Persistence Functions ---
+  function saveFriendsList() {
+    const friendEntries = friendsListContainer.querySelectorAll('.list-entry');
+    const friendsData = Array.from(friendEntries).map(entry => {
+      return { name: entry.querySelector('.player-name').textContent };
+    });
+    localStorage.setItem('friendsList', JSON.stringify(friendsData));
+  }
+
+  function loadFriendsList() {
+    const stored = localStorage.getItem('friendsList');
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch (err) {
+        return [];
+      }
+    }
+    return [];
+  }
+
+  // Populate friends list from local storage on initialization
+  const storedFriends = loadFriendsList();
+  storedFriends.forEach(friend => {
+    const newFriend = document.createElement('div');
+    newFriend.className = 'list-entry';
+    newFriend.innerHTML = `
+      <span class="player-name">${friend.name}</span>
+      <span class="world-status offline">Offline</span>
+    `;
+    friendsListContainer.appendChild(newFriend);
+  });
+
+  // Add Friend button click handler
+  addFriendButton.addEventListener('click', () => {
+    addFriendOverlay.classList.add('shown');
+    addFriendInput.value = '';
+    addFriendInput.focus();
+  });
+
+  // Del Friend button click handler
+  delFriendButton.addEventListener('click', () => {
+    delFriendOverlay.classList.add('shown');
+    delFriendInput.value = '';
+    delFriendInput.focus();
+  });
+
+  // Handle overlay submissions
+  document.addEventListener('overlay-submit', (e) => {
+    const { name, overlay } = e.detail;
+    
+    if (overlay === addFriendOverlay) {
+      const newFriend = document.createElement('div');
+      newFriend.className = 'list-entry';
+      newFriend.innerHTML = `
+        <span class="player-name">${name}</span>
+        <span class="world-status offline">Offline</span>
+      `;
+      friendsListContainer.appendChild(newFriend);
+      saveFriendsList();
+    } else if (overlay === delFriendOverlay) {
+      const friendEntries = friendsListContainer.querySelectorAll('.list-entry');
+      friendEntries.forEach(entry => {
+        const playerName = entry.querySelector('.player-name').textContent;
+        if (playerName === name) {
+          entry.remove();
+        }
+      });
+      saveFriendsList();
+    }
+  });
+
+  // Setup friend list hover effects
+  friendsListContainer.addEventListener('mouseover', (e) => {
+    const playerNameElement = e.target.closest('.player-name');
+    if (playerNameElement) {
+      const username = playerNameElement.textContent;
+      tooltip.style.display = 'block';
+      tooltip.textContent = `Message ${username} / 1 more option`;
+      
+      const gameScreen = document.getElementById('game-screen');
+      const gameRect = gameScreen.getBoundingClientRect();
+      tooltip.style.left = `${gameRect.left + 5}px`;
+      tooltip.style.top = `${gameRect.top + 5}px`;
+    }
+  });
+
+  friendsListContainer.addEventListener('mouseout', (e) => {
+    if (e.target.closest('.player-name')) {
+      tooltip.style.display = 'none';
+    }
+  });
+
+  // Handle friend list clicks – Message action and removal via context menu
+  friendsListContainer.addEventListener('click', (e) => {
+    const playerNameElement = e.target.closest('.player-name');
+    if (playerNameElement) {
+      const username = playerNameElement.textContent;
+      showContextMenu(e, username, 
+        () => {
+          if (typeof showMessageOverlay === 'function') {
+            showMessageOverlay(username);
+          } else {
+            console.warn('Messaging function is not available.');
+          }
+        },
+        () => {
+          playerNameElement.closest('.list-entry').remove();
+          saveFriendsList();
+        }
+      );
+    }
+  });
+
+  // UPDATED: In two mouse mode, right-click now opens the dropdown menu of options.
+  friendsListContainer.addEventListener('contextmenu', (e) => {
+    const playerNameElement = e.target.closest('.player-name');
+    if (playerNameElement) {
+      e.preventDefault();
+      const username = playerNameElement.textContent;
+      showContextMenu(e, username, 
+        () => {
+          if (typeof showMessageOverlay === 'function') {
+            showMessageOverlay(username);
+          } else {
+            console.warn('Messaging function is not available.');
+          }
+        },
+        () => {
+          playerNameElement.closest('.list-entry').remove();
+          saveFriendsList();
+        }
+      );
+    }
+  });
+}
+
+export { initializeFriendsList };
